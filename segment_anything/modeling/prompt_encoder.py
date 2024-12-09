@@ -83,7 +83,7 @@ class PromptEncoder(nn.Module):
             padding_label = -torch.ones((labels.shape[0], 1), device=labels.device)
             points = torch.cat([points, padding_point], dim=1)
             labels = torch.cat([labels, padding_label], dim=1)
-        point_embedding = self.pe_layer.forward_with_coords(points, self.input_image_size)
+        point_embedding = self.pe_layer.forward_with_coords(points, self.input_image_size) # (Bprompt, n_points, emb_dim)
         point_embedding[labels == -1] = 0.0
         point_embedding[labels == -1] += self.not_a_point_embed.weight
         point_embedding[labels == 0] += self.point_embeddings[0].weight
@@ -152,19 +152,17 @@ class PromptEncoder(nn.Module):
         sparse_embeddings = torch.empty((bs, 0, self.embed_dim), device=self._get_device())
         if points is not None:
             coords, labels = points
-            point_embeddings = self._embed_points(coords, labels, pad=(boxes is None))
+            point_embeddings = self._embed_points(coords, labels, pad=(boxes is None)) # (Bprompt, n_points (there maybe one additional padding point if there are no boxes), emb_dim)
             sparse_embeddings = torch.cat([sparse_embeddings, point_embeddings], dim=1)
         if boxes is not None:
-            box_embeddings = self._embed_boxes(boxes)
-            sparse_embeddings = torch.cat([sparse_embeddings, box_embeddings], dim=1)
-
+            box_embeddings = self._embed_boxes(boxes) # (Bprompt, 2 (top left + bottom right), emb_dim)
+            sparse_embeddings = torch.cat([sparse_embeddings, box_embeddings], dim=1) # (Bprompt, n_points + 2 (box top left + box bottom right), emb_dim)
         if masks is not None:
-            dense_embeddings = self._embed_masks(masks)
+            dense_embeddings = self._embed_masks(masks) # (Bprompt, emb_dim, H, W)
         else:
             dense_embeddings = self.no_mask_embed.weight.reshape(1, -1, 1, 1).expand(
                 bs, -1, self.image_embedding_size[0], self.image_embedding_size[1]
             )
-
         return sparse_embeddings, dense_embeddings
 
 
@@ -189,6 +187,7 @@ class PositionEmbeddingRandom(nn.Module):
         coords = coords @ self.positional_encoding_gaussian_matrix
         coords = 2 * np.pi * coords
         # outputs d_1 x ... x d_n x C shape
+        
         return torch.cat([torch.sin(coords), torch.cos(coords)], dim=-1)
 
     def forward(self, size: Tuple[int, int]) -> torch.Tensor:

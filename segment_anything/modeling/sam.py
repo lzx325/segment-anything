@@ -96,25 +96,31 @@ class Sam(nn.Module):
         """
         input_images = torch.stack([self.preprocess(x["image"]) for x in batched_input], dim=0)
         image_embeddings = self.image_encoder(input_images)
-
         outputs = []
         for image_record, curr_embedding in zip(batched_input, image_embeddings):
             if "point_coords" in image_record:
                 points = (image_record["point_coords"], image_record["point_labels"])
             else:
                 points = None
+
+            # each batch element has at most one box and one mask, but can have multiple points
+            # sparse_embeddings: (Bprompt, n_points + 2 (box top left + box bottom right), emb_dim)
+            # dense_embeddings: (Bprompt, emb_dim, H, W)
+
             sparse_embeddings, dense_embeddings = self.prompt_encoder(
                 points=points,
                 boxes=image_record.get("boxes", None),
                 masks=image_record.get("mask_inputs", None),
             )
+            
             low_res_masks, iou_predictions = self.mask_decoder(
-                image_embeddings=curr_embedding.unsqueeze(0),
-                image_pe=self.prompt_encoder.get_dense_pe(),
-                sparse_prompt_embeddings=sparse_embeddings,
-                dense_prompt_embeddings=dense_embeddings,
+                image_embeddings=curr_embedding.unsqueeze(0), # (1, emb_dim, H, W)
+                image_pe=self.prompt_encoder.get_dense_pe(), # (1, emb_dim, H, W)
+                sparse_prompt_embeddings=sparse_embeddings, # (Bprompt, n_points + 2 (box top left + box bottom right), emb_dim)
+                dense_prompt_embeddings=dense_embeddings, # (Bprompt, emb_dim, H, W)
                 multimask_output=multimask_output,
             )
+
             masks = self.postprocess_masks(
                 low_res_masks,
                 input_size=image_record["image"].shape[-2:],

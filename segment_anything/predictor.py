@@ -85,8 +85,8 @@ class SamPredictor:
 
         self.original_size = original_image_size
         self.input_size = tuple(transformed_image.shape[-2:])
-        input_image = self.model.preprocess(transformed_image)
-        self.features = self.model.image_encoder(input_image)
+        input_image = self.model.preprocess(transformed_image) # (B, 3, 16*W=1024, 16*H=1024)
+        self.features = self.model.image_encoder(input_image) # (B, emb_dim, W, H)
         self.is_image_set = True
 
     def predict(
@@ -219,23 +219,28 @@ class SamPredictor:
             points = None
 
         # Embed prompts
+        # sparse_embeddings: (B, 2=(sin,cos), emb_dim) contains point and box embeddings
+        # dense_embeddings: (B, emb_dim, W, H) contains mask embeddings; if no box embeddings, use a default vector to fill it
         sparse_embeddings, dense_embeddings = self.model.prompt_encoder(
             points=points,
             boxes=boxes,
             masks=mask_input,
         )
+        
 
         # Predict masks
+        # low_res_masks: (B, n_segentations, 4W, 4H)
+        # iou_predictions: (B, n_segmentations)
         low_res_masks, iou_predictions = self.model.mask_decoder(
             image_embeddings=self.features,
             image_pe=self.model.prompt_encoder.get_dense_pe(),
             sparse_prompt_embeddings=sparse_embeddings,
             dense_prompt_embeddings=dense_embeddings,
-            multimask_output=multimask_output,
+            multimask_output=multimask_output
         )
 
         # Upscale the masks to the original image resolution
-        masks = self.model.postprocess_masks(low_res_masks, self.input_size, self.original_size)
+        masks = self.model.postprocess_masks(low_res_masks, self.input_size, self.original_size) # upsample to original size: (B, n_segentations, 16W, 16H)
 
         if not return_logits:
             masks = masks > self.model.mask_threshold
